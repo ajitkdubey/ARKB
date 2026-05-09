@@ -1,0 +1,35 @@
+{
+  "etf": {
+    "ticker": "ARKB",
+    "name": "ARK 21Shares Bitcoin ETF",
+    "creationUnitShares": 5000,
+    "btcPerShare": 0.000303,
+    "sponsor": "ARK Investment Management / 21Shares",
+    "custodian": "Coinbase Custody",
+    "managementFeeBps": 21
+  },
+  "bitcoin": {
+    "ticker": "BTC-USD"
+  },
+  "costs": {
+    "creationRedemptionFeeUsd": 200,
+    "_creationRedemptionFeeNote": "NOT PUBLICLY DISCLOSED. Exhibit E of AP Agreement is a private commercial term, blank in all EDGAR filings. Best estimate based on cash-creation model: $100-$300. See PARAMETERS.md.",
+    "etfCommissionPerShare": 0.005,
+    "btcExecutionBps": 2,
+    "marketImpactBps": 1,
+    "btcSpotSpreadBps": 2
+  },
+  "signals": {
+    "minSpreadAfterCostsBps": 10
+  },
+  "ark21shares": {
+    "holdingsUrl": "https://ark-funds.com/wp-content/uploads/funds-etf-csv/ARK_21SHARES_BITCOIN_ETF_ARKB_HOLDINGS.csv"
+  },
+  "analysis": {
+    "startDate": "2024-01-11"
+  },
+  "coinbase": {
+    "wsUrl": "wss://ws-feed.exchange.coinbase.com",
+    "restUrl": "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
+  }
+}
