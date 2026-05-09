@@ -1,18 +1,10 @@
 {
   "navigationFallback": {
-    "rewrite": "/index.html"
+    "rewrite": "/index.html",
+    "exclude": [
+      "/api/*"
+    ]
   },
-  "routes": [
-    {
-      "route": "/api/*",
-      "serve": "/index.html",
-      "statusCode": 404
-    },
-    {
-      "route": "/*",
-      "serve": "/index.html"
-    }
-  ],
   "mimeTypes": {
     ".json": "application/json",
     ".html": "text/html",

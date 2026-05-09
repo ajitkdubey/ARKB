@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARKB Arbitrage Dashboard</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; }
+
+    .header {
+      background: linear-gradient(135deg, #0d1a0d, #1a2a0a);
+      padding: 20px 30px;
+      border-bottom: 1px solid #1f3a0f;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .header h1 { font-size: 22px; color: #f7931a; }
+    .header .subtitle { color: #666; font-size: 12px; margin-top: 4px; }
+    .header .mode { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+    .mode-live { background: #0a2a0a; color: #4caf50; border: 1px solid #4caf50; }
+    .mode-dry  { background: #2a2a0a; color: #ff9800; border: 1px solid #ff9800; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 20px 30px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 30px 20px; }
+
+    .card {
+      background: #0e1a0a;
+      border: 1px solid #1f3a0f;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 {
+      color: #6a9a50;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 12px;
+    }
+    .big-number { font-size: 32px; font-weight: bold; color: #fff; }
+    .sub { font-size: 13px; color: #666; margin-top: 4px; }
+
+    .signal-box { text-align: center; padding: 30px; }
+    .signal { font-size: 42px; font-weight: bold; transition: color 0.3s; }
+    .signal-neutral { color: #444; }
+    .signal-create  { color: #4caf50; text-shadow: 0 0 20px rgba(76,175,80,0.4); }
+    .signal-redeem  { color: #f44336; text-shadow: 0 0 20px rgba(244,67,54,0.4); }
+
+    .prem-positive { color: #4caf50; }
+    .prem-negative { color: #f44336; }
+
+    .chart-container { padding: 0 30px 20px; }
+    .chart-card {
+      background: #0e1a0a;
+      border: 1px solid #1f3a0f;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .chart-card h3 {
+      color: #6a9a50;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 12px;
+    }
+
+    .trades-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .trades-table th {
+      text-align: left; padding: 8px; color: #6a9a50;
+      border-bottom: 1px solid #1f3a0f;
+      font-size: 11px; text-transform: uppercase;
+    }
+    .trades-table td { padding: 8px; border-bottom: 1px solid #0a150a; }
+    .trades-table .create { color: #4caf50; }
+    .trades-table .redeem { color: #f44336; }
+
+    .stat-row {
+      display: flex; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid #0a1a0a;
+    }
+    .stat-label { color: #6a9a50; font-size: 13px; }
+    .stat-value { color: #fff; font-size: 13px; font-weight: 600; }
+
+    .mechanics {
+      background: #080f08;
+      border: 1px solid #1a2a1a;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 12px;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.8;
+    }
+    .mechanics .step { color: #4caf50; }
+    .mechanics .step-red { color: #f44336; }
+
+    .pnl-positive { color: #4caf50 !important; }
+    .pnl-negative { color: #f44336 !important; }
+
+    .footer {
+      padding: 12px 30px;
+      color: #333;
+      font-size: 11px;
+      border-top: 1px solid #1a2a1a;
+      display: flex; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>₿ ARKB Arbitrage Monitor</h1>
+      <div class="subtitle">ARK 21Shares Bitcoin ETF — Creation/Redemption Arbitrage</div>
+    </div>
+    <div style="text-align:right">
+      <span id="clock" style="color:#666;margin-right:12px;font-size:13px;"></span>
+      <span class="mode" id="mode-badge">CONNECTING</span>
+    </div>
+  </div>
+
+  <!-- Row 1: Prices + Signal -->
+  <div class="grid">
+    <div class="card">
+      <h3>ARKB ETF Price</h3>
+      <div class="big-number" id="arkb-mid">—</div>
+      <div class="sub">Bid: <span id="arkb-bid">—</span> &nbsp;/&nbsp; Ask: <span id="arkb-ask">—</span></div>
+    </div>
+    <div class="card">
+      <h3>BTC Spot Price</h3>
+      <div class="big-number" id="btc-price">—</div>
+      <div class="sub">NAV est: <span id="nav">—</span> &nbsp;|&nbsp; BTC/Share: <span id="btc-per-share">—</span> <span id="btc-per-share-source" style="font-size:10px;color:#888"></span></div>
+    </div>
+    <div class="card signal-box">
+      <h3>Signal</h3>
+      <div class="signal signal-neutral" id="signal">NEUTRAL</div>
+      <div class="sub" id="prem-disc" style="margin-top:8px;">Premium/Discount: — bps</div>
+    </div>
+  </div>
+
+  <!-- Row 2: Stats -->
+  <div class="grid">
+    <div class="card">
+      <h3>Session P&amp;L</h3>
+      <div class="big-number" id="total-pnl">$0.00</div>
+      <div class="sub">Per creation unit (5,000 shares)</div>
+    </div>
+    <div class="card">
+      <h3>Trade Count</h3>
+      <div class="big-number" id="trade-count">0</div>
+      <div class="sub">Win rate: <span id="win-rate">0.0</span>%</div>
+    </div>
+    <div class="card">
+      <h3>Cost Threshold</h3>
+      <div class="big-number" id="threshold">—</div>
+      <div class="sub">bps (round-trip costs + min spread)</div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-container">
+    <div class="chart-card">
+      <h3>ARKB Premium / Discount (bps) — Live</h3>
+      <canvas id="premChart" height="70"></canvas>
+    </div>
+  </div>
+
+  <!-- Row 3: Trades + Info -->
+  <div class="grid-2">
+    <div class="card">
+      <h3>Recent Trades</h3>
+      <table class="trades-table">
+        <thead><tr><th>Time</th><th>Signal</th><th>Spread</th><th>P&amp;L</th></tr></thead>
+        <tbody id="trades-body"></tbody>
+      </table>
+      <div id="no-trades" style="color:#444;text-align:center;padding:20px;font-size:13px;">
+        No signals yet — watching for premium/discount...
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Arb Mechanics</h3>
+      <div class="mechanics">
+        <div><span class="step">🟢 CREATE</span> — ARKB trading at <strong>premium</strong></div>
+        <div style="padding-left:16px;color:#555">Buy BTC on spot</div>
+        <div style="padding-left:16px;color:#555">→ Deliver to <strong>Coinbase Custody</strong></div>
+        <div style="padding-left:16px;color:#555">→ Receive 5,000 ARKB shares from ARK/21Shares</div>
+        <div style="padding-left:16px;color:#555">→ Sell ARKB on exchange → capture premium</div>
+        <br>
+        <div><span class="step-red">🔴 REDEEM</span> — ARKB trading at <strong>discount</strong></div>
+        <div style="padding-left:16px;color:#555">Buy ARKB on exchange (below NAV)</div>
+        <div style="padding-left:16px;color:#555">→ Redeem with <strong>ARK / 21Shares</strong></div>
+        <div style="padding-left:16px;color:#555">→ Receive BTC from Coinbase Custody</div>
+        <div style="padding-left:16px;color:#555">→ Sell BTC on spot → capture discount</div>
+      </div>
+
+      <h3 style="margin-top:20px;">Cost Model</h3>
+      <div id="cost-info">
+        <div class="stat-row"><span class="stat-label">Create/Redeem Fee</span><span class="stat-value" id="cost-fee">—</span></div>
+        <div class="stat-row"><span class="stat-label">ETF Commission</span><span class="stat-value" id="cost-comm">—</span></div>
+        <div class="stat-row"><span class="stat-label">BTC Execution</span><span class="stat-value" id="cost-btc">—</span></div>
+        <div class="stat-row"><span class="stat-label">Market Impact (×2)</span><span class="stat-value" id="cost-impact">—</span></div>
+        <div class="stat-row"><span class="stat-label">BTC Spot Spread</span><span class="stat-value" id="cost-spread">—</span></div>
+        <div class="stat-row"><span class="stat-label">Mgmt Fee (21 bps/yr)</span><span class="stat-value">continuous accrual</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>ARKB — ARK 21Shares Bitcoin ETF | Sponsor: ARK Investment Management / 21Shares | Custodian: Coinbase Custody</span>
+    <span id="session-elapsed"></span>
+  </div>
+
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+const fmtN = (n, d=2) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// ── Chart ──────────────────────────────────────────────────────────────────
+const ctx = $('premChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    datasets: [
+      {
+        label: 'Premium/Discount (bps)',
+        data: [], borderColor: '#4caf50', borderWidth: 1.5,
+        pointRadius: 0, fill: true,
+        backgroundColor: (ctx) => {
+          const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, 200);
+          gradient.addColorStop(0, 'rgba(76,175,80,0.15)');
+          gradient.addColorStop(1, 'rgba(76,175,80,0.01)');
+          return gradient;
+        },
+        tension: 0.1,
+      },
+      { label: 'Trigger (+)', data: [], borderColor: 'rgba(76,175,80,0.25)', borderWidth: 1, borderDash: [5,5], pointRadius: 0, fill: false },
+      { label: 'Trigger (−)', data: [], borderColor: 'rgba(244,67,54,0.25)', borderWidth: 1, borderDash: [5,5], pointRadius: 0, fill: false },
+    ]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        type: 'time',
+        grid: { color: '#0a1a0a' },
+        ticks: { color: '#445', maxTicksLimit: 10 },
+      },
+      y: {
+        grid: { color: '#0a1a0a' },
+        ticks: { color: '#445' },
+        title: { display: true, text: 'basis points', color: '#445' },
+      }
+    },
+    plugins: {
+      legend: { labels: { color: '#555', font: { size: 11 } } },
+      tooltip: {
+        backgroundColor: '#0e1a0a',
+        titleColor: '#aaa',
+        bodyColor: '#ccc',
+        borderColor: '#1f3a0f',
+        borderWidth: 1,
+      }
+    }
+  }
+});
+
+// ── Socket events ─────────────────────────────────────────────────────────
+socket.on('snapshot', (s) => {
+  // Prices
+  $('arkb-mid').textContent  = '$' + fmtN(s.arkbMid, 4);
+  $('arkb-bid').textContent  = '$' + fmtN(s.arkbBid, 4);
+  $('arkb-ask').textContent  = '$' + fmtN(s.arkbAsk, 4);
+  $('btc-price').textContent = '$' + fmtN(s.btcPrice, 2);
+  $('nav').textContent       = '$' + fmtN(s.nav, 4);
+  $('btc-per-share').textContent = s.btcPerShare.toFixed(8);
+  $('btc-per-share-source').textContent = s.btcPerShareSource === 'live' ? '(live)' : '(config)';
+
+  // Signal
+  const sigEl = $('signal');
+  sigEl.textContent = s.signal;
+  sigEl.className = 'signal signal-' + s.signal.toLowerCase();
+
+  // Premium label
+  const premEl = $('prem-disc');
+  const sign = s.premBps >= 0 ? '+' : '';
+  premEl.innerHTML = `Premium/Discount: <span class="${s.premBps >= 0 ? 'prem-positive' : 'prem-negative'}">${sign}${fmtN(s.premBps, 1)} bps</span>`;
+
+  // Stats
+  const pnlEl = $('total-pnl');
+  pnlEl.textContent = '$' + fmtN(s.totalPnl, 2);
+  pnlEl.className = 'big-number ' + (s.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative');
+  $('trade-count').textContent = s.tradeCount;
+  $('win-rate').textContent    = fmtN(s.winRate, 1);
+  $('threshold').textContent   = '±' + fmtN(s.trigger, 1);
+
+  // Mode badge
+  const badge = $('mode-badge');
+  if (s.dryRun) {
+    badge.textContent = 'DRY RUN';
+    badge.className = 'mode mode-dry';
+  }
+
+  // Chart
+  const t = new Date(s.timestamp);
+  chart.data.datasets[0].data.push({ x: t, y: s.premBps });
+  chart.data.datasets[1].data.push({ x: t, y: s.trigger });
+  chart.data.datasets[2].data.push({ x: t, y: -s.trigger });
+  if (chart.data.datasets[0].data.length > 600) {
+    chart.data.datasets.forEach(ds => ds.data.shift());
+  }
+  chart.update('none');
+
+  // Clock / elapsed
+  $('clock').textContent = new Date().toLocaleTimeString();
+  $('session-elapsed').textContent = `Session: ${s.elapsed} min`;
+});
+
+socket.on('connect', () => {
+  $('mode-badge').textContent = 'LIVE';
+  $('mode-badge').className = 'mode mode-live';
+});
+socket.on('disconnect', () => {
+  $('mode-badge').textContent = 'DISCONNECTED';
+  $('mode-badge').className = 'mode mode-dry';
+});
+
+socket.on('trade', t => addTradeRow(t));
+socket.on('trades', trades => trades.forEach(t => addTradeRow(t)));
+
+function addTradeRow(t) {
+  $('no-trades').style.display = 'none';
+  const tbody = $('trades-body');
+  const tr    = document.createElement('tr');
+  const cls   = t.signal === 'CREATE' ? 'create' : 'redeem';
+  const icon  = t.signal === 'CREATE' ? '🟢' : '🔴';
+  const time  = t.timestamp.slice(11, 19);
+  tr.innerHTML = `
+    <td>${time}</td>
+    <td class="${cls}">${icon} ${t.signal}</td>
+    <td>${fmtN(t.spreadBps, 1)} bps</td>
+    <td>$${fmtN(t.pnl, 2)}</td>
+  `;
+  tbody.insertBefore(tr, tbody.firstChild);
+  if (tbody.children.length > 25) tbody.removeChild(tbody.lastChild);
+}
+
+// ── Config (cost model) ───────────────────────────────────────────────────
+fetch('/api/config').then(r => r.json()).then(cfg => {
+  $('cost-fee').textContent    = '$' + cfg.costs.creationRedemptionFeeUsd + ' flat';
+  $('cost-comm').textContent   = '$' + cfg.costs.etfCommissionPerShare + '/share';
+  $('cost-btc').textContent    = cfg.costs.btcExecutionBps + ' bps';
+  $('cost-impact').textContent = cfg.costs.marketImpactBps + ' bps';
+  $('cost-spread').textContent = cfg.costs.btcSpotSpreadBps + ' bps';
+});
+
+// Load historical data for chart prefill
+fetch('/api/history').then(r => r.json()).then(history => {
+  for (const h of history) {
+    chart.data.datasets[0].data.push({ x: new Date(h.t), y: h.premBps });
+  }
+  chart.update();
+});
+</script>
+</body>
+</html>

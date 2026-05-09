@@ -4,12 +4,14 @@
   "description": "ARKB ETF Creation/Redemption Arbitrage — Node.js monitor & dashboard",
   "main": "index.js",
   "scripts": {
+    "build": "node build.js",
+    "verify": "node verify.js",
     "analyze": "node analyze.js",
     "monitor": "node monitor.js --dry-run",
     "monitor:live": "node monitor.js",
     "dashboard": "node dashboard.js --dry-run",
     "dashboard:live": "node dashboard.js",
-    "deploy": "dotenv -- swa deploy ./dist"
+    "deploy": "node build.js && node verify.js && dotenv -- swa deploy ./dist"
   },
   "keywords": [],
   "author": "",
