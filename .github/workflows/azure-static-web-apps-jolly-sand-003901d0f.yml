@@ -29,11 +29,11 @@ jobs:
       - name: Build from node folder
         working-directory: ./ARKB-arb/node
         run: npm run build
-      - name: Run dashboard live smoke test
-        working-directory: ./ARKB-arb/node
+      - name: Run dashboard live smoke test from dist
+        working-directory: ./ARKB-arb/node/dist
         run: |
           set -e
-          npm run dashboard:live &
+          node dashboard.js &
           DASH_PID=$!
           for i in {1..20}; do
             if curl -fsS http://127.0.0.1:5001/api/state >/dev/null; then
