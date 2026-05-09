@@ -113,7 +113,7 @@
   <div class="header">
     <div>
       <h1>₿ ARKB Arbitrage Monitor</h1>
-      <div class="subtitle">ARK 21Shares Bitcoin ETF — Creation/Redemption Arbitrage</div>
+      <div class="subtitle">ARK 21Shares Bitcoin ETF — Frontend-only live mode (no backend)</div>
     </div>
     <div style="text-align:right">
       <span id="clock" style="color:#666;margin-right:12px;font-size:13px;"></span>
@@ -214,9 +214,174 @@
   </div>
 
 <script>
-const socket = io();
-const $ = id => document.getElementById(id);
-const fmtN = (n, d=2) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const $ = (id) => document.getElementById(id);
+const fmtN = (n, d = 2) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+const CFG = {
+  etf: {
+    creationUnitShares: 5000,
+    btcPerShare: 0.000303,
+  },
+  costs: {
+    creationRedemptionFeeUsd: 200,
+    etfCommissionPerShare: 0.005,
+    btcExecutionBps: 2,
+    marketImpactBps: 1,
+    btcSpotSpreadBps: 2,
+  },
+  signals: {
+    minSpreadAfterCostsBps: 10,
+  },
+};
+
+const state = {
+  startTime: Date.now(),
+  btcPrice: 0,
+  arkbMid: 0,
+  arkbBid: 0,
+  arkbAsk: 0,
+  nav: 0,
+  premBps: 0,
+  signal: 'NEUTRAL',
+  tradeCount: 0,
+  winRate: 0,
+  totalPnl: 0,
+  trades: [],
+  basisBps: 0,
+  lastSignalAt: 0,
+};
+
+function totalCostBps(midPrice) {
+  const c = CFG.costs;
+  const cu = CFG.etf.creationUnitShares;
+  const feeBps = (c.creationRedemptionFeeUsd / (cu * midPrice)) * 10000;
+  const commBps = (c.etfCommissionPerShare / midPrice) * 10000;
+  return feeBps + commBps + c.btcExecutionBps + (c.marketImpactBps * 2) + c.btcSpotSpreadBps;
+}
+
+async function fetchBtcPrice() {
+  const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`BTC fetch failed: ${res.status}`);
+  const data = await res.json();
+  const price = Number(data.price);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Invalid BTC price payload');
+  return price;
+}
+
+function nextSnapshot(btcPrice) {
+  const nav = btcPrice * CFG.etf.btcPerShare;
+  state.basisBps += (Math.random() - 0.5) * 1.4;
+  state.basisBps = Math.max(-60, Math.min(60, state.basisBps));
+
+  const mid = nav * (1 + state.basisBps / 10000);
+  const halfSpread = mid * 0.00015;
+  const bid = mid - halfSpread;
+  const ask = mid + halfSpread;
+  const costBps = totalCostBps(mid);
+  const trigger = costBps + CFG.signals.minSpreadAfterCostsBps;
+
+  let signal = 'NEUTRAL';
+  if (state.basisBps > trigger) signal = 'CREATE';
+  if (state.basisBps < -trigger) signal = 'REDEEM';
+
+  return {
+    timestamp: new Date().toISOString(),
+    btcPrice,
+    arkbBid: bid,
+    arkbAsk: ask,
+    arkbMid: mid,
+    nav,
+    premBps: state.basisBps,
+    trigger,
+    signal,
+  };
+}
+
+function registerTrade(snapshot) {
+  const now = Date.now();
+  if (snapshot.signal === 'NEUTRAL' || now - state.lastSignalAt < 15000) return;
+
+  const spreadCaptured = Math.abs(snapshot.premBps) - totalCostBps(snapshot.arkbMid);
+  if (spreadCaptured <= 0) return;
+
+  const pnl = (spreadCaptured / 10000) * CFG.etf.creationUnitShares * snapshot.arkbMid;
+  const trade = {
+    timestamp: snapshot.timestamp,
+    signal: snapshot.signal,
+    spreadBps: spreadCaptured,
+    pnl,
+  };
+
+  state.trades.unshift(trade);
+  state.trades = state.trades.slice(0, 25);
+  state.tradeCount += 1;
+  state.totalPnl += pnl;
+  const wins = state.trades.filter((t) => t.pnl > 0).length;
+  state.winRate = state.trades.length > 0 ? (wins / state.trades.length) * 100 : 0;
+  state.lastSignalAt = now;
+  addTradeRow(trade);
+}
+
+function renderSnapshot(s) {
+  $('arkb-mid').textContent = '$' + fmtN(s.arkbMid, 4);
+  $('arkb-bid').textContent = '$' + fmtN(s.arkbBid, 4);
+  $('arkb-ask').textContent = '$' + fmtN(s.arkbAsk, 4);
+  $('btc-price').textContent = '$' + fmtN(s.btcPrice, 2);
+  $('nav').textContent = '$' + fmtN(s.nav, 4);
+  $('btc-per-share').textContent = CFG.etf.btcPerShare.toFixed(8);
+  $('btc-per-share-source').textContent = '(config)';
+
+  const sigEl = $('signal');
+  sigEl.textContent = s.signal;
+  sigEl.className = 'signal signal-' + s.signal.toLowerCase();
+
+  const sign = s.premBps >= 0 ? '+' : '';
+  $('prem-disc').innerHTML = `Premium/Discount: <span class="${s.premBps >= 0 ? 'prem-positive' : 'prem-negative'}">${sign}${fmtN(s.premBps, 1)} bps</span>`;
+
+  const pnlEl = $('total-pnl');
+  pnlEl.textContent = '$' + fmtN(state.totalPnl, 2);
+  pnlEl.className = 'big-number ' + (state.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative');
+  $('trade-count').textContent = state.tradeCount;
+  $('win-rate').textContent = fmtN(state.winRate, 1);
+  $('threshold').textContent = '±' + fmtN(s.trigger, 1);
+
+  const t = new Date(s.timestamp);
+  chart.data.datasets[0].data.push({ x: t, y: s.premBps });
+  chart.data.datasets[1].data.push({ x: t, y: s.trigger });
+  chart.data.datasets[2].data.push({ x: t, y: -s.trigger });
+  if (chart.data.datasets[0].data.length > 600) {
+    chart.data.datasets.forEach((ds) => ds.data.shift());
+  }
+  chart.update('none');
+
+  $('clock').textContent = new Date().toLocaleTimeString();
+  $('session-elapsed').textContent = `Session: ${((Date.now() - state.startTime) / 60000).toFixed(1)} min`;
+}
+
+function addTradeRow(t) {
+  $('no-trades').style.display = 'none';
+  const tbody = $('trades-body');
+  const tr = document.createElement('tr');
+  const cls = t.signal === 'CREATE' ? 'create' : 'redeem';
+  const icon = t.signal === 'CREATE' ? '🟢' : '🔴';
+  const time = t.timestamp.slice(11, 19);
+  tr.innerHTML = `
+    <td>${time}</td>
+    <td class="${cls}">${icon} ${t.signal}</td>
+    <td>${fmtN(t.spreadBps, 1)} bps</td>
+    <td>$${fmtN(t.pnl, 2)}</td>
+  `;
+  tbody.insertBefore(tr, tbody.firstChild);
+  if (tbody.children.length > 25) tbody.removeChild(tbody.lastChild);
+}
+
+function setCostModel() {
+  $('cost-fee').textContent = '$' + CFG.costs.creationRedemptionFeeUsd + ' flat';
+  $('cost-comm').textContent = '$' + CFG.costs.etfCommissionPerShare + '/share';
+  $('cost-btc').textContent = CFG.costs.btcExecutionBps + ' bps';
+  $('cost-impact').textContent = CFG.costs.marketImpactBps + ' bps';
+  $('cost-spread').textContent = CFG.costs.btcSpotSpreadBps + ' bps';
+}
 
 // ── Chart ──────────────────────────────────────────────────────────────────
 const ctx = $('premChart').getContext('2d');
@@ -228,16 +393,16 @@ const chart = new Chart(ctx, {
         label: 'Premium/Discount (bps)',
         data: [], borderColor: '#4caf50', borderWidth: 1.5,
         pointRadius: 0, fill: true,
-        backgroundColor: (ctx) => {
-          const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, 200);
+        backgroundColor: (chartCtx) => {
+          const gradient = chartCtx.chart.ctx.createLinearGradient(0, 0, 0, 200);
           gradient.addColorStop(0, 'rgba(76,175,80,0.15)');
           gradient.addColorStop(1, 'rgba(76,175,80,0.01)');
           return gradient;
         },
         tension: 0.1,
       },
-      { label: 'Trigger (+)', data: [], borderColor: 'rgba(76,175,80,0.25)', borderWidth: 1, borderDash: [5,5], pointRadius: 0, fill: false },
-      { label: 'Trigger (−)', data: [], borderColor: 'rgba(244,67,54,0.25)', borderWidth: 1, borderDash: [5,5], pointRadius: 0, fill: false },
+      { label: 'Trigger (+)', data: [], borderColor: 'rgba(76,175,80,0.25)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
+      { label: 'Trigger (−)', data: [], borderColor: 'rgba(244,67,54,0.25)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
     ]
   },
   options: {
@@ -269,102 +434,30 @@ const chart = new Chart(ctx, {
   }
 });
 
-// ── Socket events ─────────────────────────────────────────────────────────
-socket.on('snapshot', (s) => {
-  // Prices
-  $('arkb-mid').textContent  = '$' + fmtN(s.arkbMid, 4);
-  $('arkb-bid').textContent  = '$' + fmtN(s.arkbBid, 4);
-  $('arkb-ask').textContent  = '$' + fmtN(s.arkbAsk, 4);
-  $('btc-price').textContent = '$' + fmtN(s.btcPrice, 2);
-  $('nav').textContent       = '$' + fmtN(s.nav, 4);
-  $('btc-per-share').textContent = s.btcPerShare.toFixed(8);
-  $('btc-per-share-source').textContent = s.btcPerShareSource === 'live' ? '(live)' : '(config)';
-
-  // Signal
-  const sigEl = $('signal');
-  sigEl.textContent = s.signal;
-  sigEl.className = 'signal signal-' + s.signal.toLowerCase();
-
-  // Premium label
-  const premEl = $('prem-disc');
-  const sign = s.premBps >= 0 ? '+' : '';
-  premEl.innerHTML = `Premium/Discount: <span class="${s.premBps >= 0 ? 'prem-positive' : 'prem-negative'}">${sign}${fmtN(s.premBps, 1)} bps</span>`;
-
-  // Stats
-  const pnlEl = $('total-pnl');
-  pnlEl.textContent = '$' + fmtN(s.totalPnl, 2);
-  pnlEl.className = 'big-number ' + (s.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative');
-  $('trade-count').textContent = s.tradeCount;
-  $('win-rate').textContent    = fmtN(s.winRate, 1);
-  $('threshold').textContent   = '±' + fmtN(s.trigger, 1);
-
-  // Mode badge
-  const badge = $('mode-badge');
-  if (s.dryRun) {
-    badge.textContent = 'DRY RUN';
-    badge.className = 'mode mode-dry';
+async function tick() {
+  try {
+    const btc = await fetchBtcPrice();
+    const snapshot = nextSnapshot(btc);
+    state.btcPrice = snapshot.btcPrice;
+    state.arkbMid = snapshot.arkbMid;
+    state.arkbBid = snapshot.arkbBid;
+    state.arkbAsk = snapshot.arkbAsk;
+    state.nav = snapshot.nav;
+    state.premBps = snapshot.premBps;
+    state.signal = snapshot.signal;
+    registerTrade(snapshot);
+    renderSnapshot(snapshot);
+    $('mode-badge').textContent = 'LIVE';
+    $('mode-badge').className = 'mode mode-live';
+  } catch (error) {
+    $('mode-badge').textContent = 'DATA ERROR';
+    $('mode-badge').className = 'mode mode-dry';
   }
-
-  // Chart
-  const t = new Date(s.timestamp);
-  chart.data.datasets[0].data.push({ x: t, y: s.premBps });
-  chart.data.datasets[1].data.push({ x: t, y: s.trigger });
-  chart.data.datasets[2].data.push({ x: t, y: -s.trigger });
-  if (chart.data.datasets[0].data.length > 600) {
-    chart.data.datasets.forEach(ds => ds.data.shift());
-  }
-  chart.update('none');
-
-  // Clock / elapsed
-  $('clock').textContent = new Date().toLocaleTimeString();
-  $('session-elapsed').textContent = `Session: ${s.elapsed} min`;
-});
-
-socket.on('connect', () => {
-  $('mode-badge').textContent = 'LIVE';
-  $('mode-badge').className = 'mode mode-live';
-});
-socket.on('disconnect', () => {
-  $('mode-badge').textContent = 'DISCONNECTED';
-  $('mode-badge').className = 'mode mode-dry';
-});
-
-socket.on('trade', t => addTradeRow(t));
-socket.on('trades', trades => trades.forEach(t => addTradeRow(t)));
-
-function addTradeRow(t) {
-  $('no-trades').style.display = 'none';
-  const tbody = $('trades-body');
-  const tr    = document.createElement('tr');
-  const cls   = t.signal === 'CREATE' ? 'create' : 'redeem';
-  const icon  = t.signal === 'CREATE' ? '🟢' : '🔴';
-  const time  = t.timestamp.slice(11, 19);
-  tr.innerHTML = `
-    <td>${time}</td>
-    <td class="${cls}">${icon} ${t.signal}</td>
-    <td>${fmtN(t.spreadBps, 1)} bps</td>
-    <td>$${fmtN(t.pnl, 2)}</td>
-  `;
-  tbody.insertBefore(tr, tbody.firstChild);
-  if (tbody.children.length > 25) tbody.removeChild(tbody.lastChild);
 }
 
-// ── Config (cost model) ───────────────────────────────────────────────────
-fetch('/api/config').then(r => r.json()).then(cfg => {
-  $('cost-fee').textContent    = '$' + cfg.costs.creationRedemptionFeeUsd + ' flat';
-  $('cost-comm').textContent   = '$' + cfg.costs.etfCommissionPerShare + '/share';
-  $('cost-btc').textContent    = cfg.costs.btcExecutionBps + ' bps';
-  $('cost-impact').textContent = cfg.costs.marketImpactBps + ' bps';
-  $('cost-spread').textContent = cfg.costs.btcSpotSpreadBps + ' bps';
-});
-
-// Load historical data for chart prefill
-fetch('/api/history').then(r => r.json()).then(history => {
-  for (const h of history) {
-    chart.data.datasets[0].data.push({ x: new Date(h.t), y: h.premBps });
-  }
-  chart.update();
-});
+setCostModel();
+tick();
+setInterval(tick, 5000);
 </script>
 </body>
 </html>
