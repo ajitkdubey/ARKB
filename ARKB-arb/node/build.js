@@ -11,6 +11,7 @@ const requiredFilesToCopy = [
   ['analyze.js', 'analyze.js'],
   ['dashboard.js', 'dashboard.js'],
   ['monitor.js', 'monitor.js'],
+  ['verify.js', 'verify.js'],
   ['config.json', 'config.json'],
   ['package.json', 'package.json'],
   ['package-lock.json', 'package-lock.json'],
@@ -69,6 +70,33 @@ function writeEnvExample() {
   fs.writeFileSync(path.join(distDir, '.env.example'), envExample);
 }
 
+function verifyDistManifest() {
+  const requiredDistFiles = [
+    'index.html',
+    'public/index.html',
+    'staticwebapp.config.json',
+    'config.json',
+    'dashboard.js',
+    'monitor.js',
+    'analyze.js',
+    'verify.js',
+    'lib/utils.js',
+    'lib/discord.js',
+    'package.json',
+    'package-lock.json',
+    '.env.example',
+  ];
+
+  const missing = requiredDistFiles.filter((relativePath) => {
+    const fullPath = path.join(distDir, relativePath);
+    return !fs.existsSync(fullPath);
+  });
+
+  if (missing.length > 0) {
+    throw new Error(`Build output is missing required files: ${missing.join(', ')}`);
+  }
+}
+
 function main() {
   cleanDist();
 
@@ -81,6 +109,7 @@ function main() {
   }
 
   writeEnvExample();
+  verifyDistManifest();
   console.log(`Built dist at ${distDir}`);
 }
 
