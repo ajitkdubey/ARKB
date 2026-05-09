@@ -148,39 +148,66 @@ npm run monitor    # dry-run
            Est. P&L: $341 after costs
 ```
 
-### Phase 3: Web Dashboard
+### Phase 3: Web Dashboard (Frontend-Only)
 
-Real-time browser dashboard with live Chart.js premium/discount chart and trade log.
+**No backend required.** The dashboard is a pure static frontend that:
+- Fetches live BTC prices directly from **Coinbase WebSocket API** (via REST polling every 5 seconds)
+- Computes ARKB NAV client-side using config parameters
+- Displays premium/discount and arb signals in real time
+- Charts and trades are all in-browser state
+
+#### Local Development
+
+Serve the dashboard locally from the source folder:
 
 ```bash
-# Dry run
-node dashboard.js --dry-run
+cd ARKB-arb/node/
 
-# Live mode on default port 5000
-node dashboard.js
+# Install dependencies (first time only)
+npm install
 
-# Custom port
-node dashboard.js --port 8080
+# Start local dev server on http://localhost:3000
+npm run dev
 ```
 
-Or via npm:
+Then open **http://localhost:3000** in your browser.
+
+The dashboard will start fetching live BTC prices immediately and display real-time premium/discount data.
+
+#### Build for Production
+
 ```bash
-npm run dashboard    # dry-run at localhost:5000
+# Build static artifact into dist/
+npm run build
+
+# Verify dist artifact works
+npm run verify
 ```
 
-Then open **http://localhost:5000** in your browser.
+Deployed to Azure Static Web Apps: [https://jolly-sand-003901d0f.7.azurestaticapps.net](https://jolly-sand-003901d0f.7.azurestaticapps.net)
 
-### Discord Alerts (optional)
+#### Customization
 
-Copy `.env.example` to `.env` and fill in:
+Edit cost model and signal thresholds in `config.json`, then rebuild:
 
+```json
+{
+  "etf": {
+    "btcPerShare": 0.000303,  // Update if ARKB composition changes
+    "creationUnitShares": 5000
+  },
+  "costs": {
+    "creationRedemptionFeeUsd": 200,
+    "etfCommissionPerShare": 0.005,
+    "btcExecutionBps": 2,
+    "marketImpactBps": 1,
+    "btcSpotSpreadBps": 2
+  },
+  "signals": {
+    "minSpreadAfterCostsBps": 10  // Arb trigger threshold
+  }
+}
 ```
-DISCORD_TOKEN=your_bot_token
-DISCORD_USER_ID=your_user_id
-DISCORD_GUILD_ID=your_guild_id
-```
-
-The bot will post CREATE/REDEEM signal embeds to `#arkb-arb-alerts`.
 
 ### Configuration (`node/config.json`)
 

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node build.js",
     "verify": "node verify.js",
+    "dev": "npx http-server public -p 3000 -g",
     "analyze": "node analyze.js",
     "monitor": "node monitor.js --dry-run",
     "monitor:live": "node monitor.js",
