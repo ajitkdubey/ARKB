@@ -6,9 +6,8 @@ const path = require('path');
 const rootDir = __dirname;
 const distDir = path.join(rootDir, 'dist');
 
-const filesToCopy = [
+const requiredFilesToCopy = [
   ['README.md', 'README.md'],
-  ['DEPLOYMENT.md', 'DEPLOYMENT.md'],
   ['analyze.js', 'analyze.js'],
   ['dashboard.js', 'dashboard.js'],
   ['monitor.js', 'monitor.js'],
@@ -20,6 +19,10 @@ const filesToCopy = [
   ['public/index.html', 'public/index.html'],
   ['lib/utils.js', 'lib/utils.js'],
   ['lib/discord.js', 'lib/discord.js'],
+];
+
+const optionalFilesToCopy = [
+  ['DEPLOYMENT.md', 'DEPLOYMENT.md'],
 ];
 
 function ensureDir(dirPath) {
@@ -34,6 +37,17 @@ function copyFile(fromRelativePath, toRelativePath) {
     throw new Error(`Missing required build input: ${fromRelativePath}`);
   }
 
+  ensureDir(path.dirname(targetPath));
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function copyFileIfPresent(fromRelativePath, toRelativePath) {
+  const sourcePath = path.join(rootDir, fromRelativePath);
+  if (!fs.existsSync(sourcePath)) {
+    return;
+  }
+
+  const targetPath = path.join(distDir, toRelativePath);
   ensureDir(path.dirname(targetPath));
   fs.copyFileSync(sourcePath, targetPath);
 }
@@ -58,8 +72,12 @@ function writeEnvExample() {
 function main() {
   cleanDist();
 
-  for (const [fromRelativePath, toRelativePath] of filesToCopy) {
+  for (const [fromRelativePath, toRelativePath] of requiredFilesToCopy) {
     copyFile(fromRelativePath, toRelativePath);
+  }
+
+  for (const [fromRelativePath, toRelativePath] of optionalFilesToCopy) {
+    copyFileIfPresent(fromRelativePath, toRelativePath);
   }
 
   writeEnvExample();
