@@ -106,6 +106,33 @@
       border-top: 1px solid #1a2a1a;
       display: flex; justify-content: space-between;
     }
+
+    .label {
+      color: #6a9a50;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 12px;
+    }
+
+    #market-overview table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    #market-overview th,
+    #market-overview td {
+      padding: 8px;
+      border-bottom: 1px solid #0a150a;
+      text-align: left;
+    }
+
+    #market-overview th {
+      color: #6a9a50;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -205,6 +232,13 @@
         <div class="stat-row"><span class="stat-label">BTC Spot Spread</span><span class="stat-value" id="cost-spread">—</span></div>
         <div class="stat-row"><span class="stat-label">Mgmt Fee (21 bps/yr)</span><span class="stat-value">continuous accrual</span></div>
       </div>
+    </div>
+  </div>
+
+  <div style="margin: 0 24px 16px;">
+    <div class="card">
+      <div class="label" style="margin-bottom:10px">Market Overview</div>
+      <div id="market-overview" style="color:#555;text-align:center">Loading...</div>
     </div>
   </div>
 
@@ -383,6 +417,46 @@ function setCostModel() {
   $('cost-spread').textContent = CFG.costs.btcSpotSpreadBps + ' bps';
 }
 
+async function loadMarketOverview() {
+  try {
+    const res = await fetch('https://btctrader-api-68276-gqbkg8bucfbndjgn.z01.azurefd.net/api/market-overview', {
+      cache: 'no-store',
+      // headers: { "X-API-Key": "your-secret" }  // uncomment if DASHBOARD_API_KEY is set
+    });
+    if (!res.ok) throw new Error(`Market overview fetch failed: ${res.status}`);
+
+    const json = await res.json();
+    const arkbEntries = Object.entries(json.market_data || {}).filter(([sym]) => sym.toUpperCase() === 'ARKB');
+
+    const rows = arkbEntries.length > 0
+      ? arkbEntries.map(([sym, d]) => {
+        const change = d.change_pct != null
+          ? `<span style="color:${d.change_pct >= 0 ? 'green' : 'red'}">${d.change_pct > 0 ? '+' : ''}${d.change_pct}%</span>`
+          : '—';
+
+        return `<tr>
+          <td><b>${sym}</b></td>
+          <td>${d.last != null ? '$' + Number(d.last).toLocaleString() : '—'}</td>
+          <td>${d.bid != null ? '$' + Number(d.bid).toLocaleString() : '—'}</td>
+          <td>${d.ask != null ? '$' + Number(d.ask).toLocaleString() : '—'}</td>
+          <td>${d.spread_bps != null ? d.spread_bps + ' bps' : '—'}</td>
+          <td>${change}</td>
+        </tr>`;
+      }).join('')
+      : '<tr><td colspan="6" style="color:#555;text-align:center">No ARKB data</td></tr>';
+
+    $('market-overview').innerHTML = `
+      <table>
+        <thead><tr><th>Symbol</th><th>Last</th><th>Bid</th><th>Ask</th><th>Spread</th><th>Change</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <small style="display:block;margin-top:8px;color:#666">Updated: ${json.timestamp || new Date().toISOString()}</small>
+    `;
+  } catch (error) {
+    $('market-overview').innerHTML = '<div style="color:#f44336;text-align:center">Failed to load market overview</div>';
+  }
+}
+
 // ── Chart ──────────────────────────────────────────────────────────────────
 const ctx = $('premChart').getContext('2d');
 const chart = new Chart(ctx, {
@@ -457,7 +531,9 @@ async function tick() {
 
 setCostModel();
 tick();
+loadMarketOverview();
 setInterval(tick, 5000);
+setInterval(loadMarketOverview, 5000);
 </script>
 </body>
 </html>
